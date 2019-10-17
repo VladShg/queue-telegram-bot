@@ -86,7 +86,6 @@ async def pin_switch_handler(message: Message):
         await message.reply("Пин выключен", reply=False)
     session.close()
 
-
 # /timer
 @dp.message_handler(text="/timer")
 async def timer_empty_handler(message: Message):
@@ -124,13 +123,16 @@ async def timer_handler(message: Message):
 
     await message.reply(f"Таймер установлен на {int(arg[1])} минут", reply=False)
 
-
 # /create [title]
 @dp.message_handler(commands=["create"])
 async def create_handler(message: Message):
     title = message.text[8:]
     if title.replace(" ", "") == "":
         await message.reply("Пустой заголовок. Испольузйте /create [text]\n",
+                            reply=False)
+        return
+    if len(title) >= 3500:
+        await message.reply("Заголовок не может быть длиннее 3500 символов",
                             reply=False)
         return
     session = Session()
@@ -177,6 +179,9 @@ async def delete_handler(message: Message):
 @dp.message_handler(lambda msg: is_reply_queue(msg))
 async def queue_reply_handler(message: Message):
     username = message.text
+    if "@" not in username or len(username) >= 3500:
+        await message.reply("Неправильный `@юзернейм` или слишком длинное сообщение")
+        return
     username_plain = username.replace("@", "")
     session = Session()
     __ = get_user(session, message.from_user)  # update sender obj
