@@ -163,6 +163,8 @@ async def delete_handler(message: Message):
         if queue.is_pinned is False:
             await message.reply(f"{queue.title} удалена. Публикация по установленному времени отменена", reply=False)
             session.delete(queue)
+            session.commit()
+            session.close()
         else:
             await message.reply(f"{queue.title} закрыта. Сообщение и очередь удалены", reply=False)
             await bot.delete_message(queue.chat_id, queue.message_id)
