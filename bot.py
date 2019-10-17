@@ -1,5 +1,3 @@
-import hashlib
-import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import re
 import sys
@@ -13,8 +11,6 @@ from aiogram.types import InlineQuery, Message, User as TelegramUser, \
 from database import Session, Chat, QueueRecord, Queue, User
 from datetime import datetime, timedelta
 from config import token
-
-# logging.basicConfig(level=logging.DEBUG)
 
 bot = Bot(token=token)
 dp = Dispatcher(bot)
@@ -66,6 +62,8 @@ async def info_handler(message: Message):
     chat_pin = "[✅ Включено]" if chat.pin else "[❌ Отключено]"
     text = "Список команд:" \
            "\n/create [text] - создать очередь." \
+           "\n/delete - удалить очередь(ответить на сообщение бота о создании или " \
+           "планировании публикации, право на удаление есть только у создателя)." \
            f"\n/timer [mins] - установить время между созданием очереди и пином [{chat.default_time} минут]." \
            f"\n/pin - пин (с уведомлением) {chat_pin}." \
            f"\n(если уведомление не пришло, проблемы телеграма, а не бота)" \
@@ -141,32 +139,37 @@ async def create_handler(message: Message):
     delta = timedelta(minutes=chat.default_time)
     time += delta
 
-    queue = Queue(creator_id=message.from_user.id, message_id=message.message_id,
+    message_bot = await message.reply(f"{title}\n\nВремя публикации: {time.strftime('%H:%M, %d.%m.%Y')}",
+                                      reply=False)
+
+    queue = Queue(creator_id=message.from_user.id, message_id=message_bot.message_id,
                   pin_date=time, title=title, chat_id=message.chat.id)
     session.add(queue)
     session.commit()
     session.close()
 
-    await message.reply(f"{title}\n\nВремя публикации: {time.strftime('%H:%M, %d.%m.%Y')}",
-                        reply=False)
-
-
 # /delete
-@dp.message_handler(lambda msg: msg.reply_to_message is not None, commands=["/delete"])
+@dp.message_handler(lambda msg: msg.reply_to_message is not None, commands=["delete"])
 async def delete_handler(message: Message):
     pass
     session = Session()
-    queue = session.query(Queue).filter(Queue.creator_id == message.from_user.id,
-                                        Queue.chat_id == message.chat.id,
+    queue = session.query(Queue).filter(Queue.chat_id == message.chat.id,
                                         Queue.message_id == message.reply_to_message.message_id).first()
-    if queue:
+    if queue.creator_id != message.from_user.id:
+        await message.reply("Право закрыть очередь есть только у создателя")
         session.close()
-
         return
-
-    session.close()
-
-    await message.reply("Право закрыть очередь есть только у создателя", reply=False)
+    else:
+        if queue.is_pinned is False:
+            await message.reply(f"{queue.title} удалена. Публикация по установленному времени отменена", reply=False)
+            session.delete(queue)
+        else:
+            await message.reply(f"{queue.title} закрыта. Сообщение и очередь удалены", reply=False)
+            await bot.delete_message(queue.chat_id, queue.message_id)
+            session.query(QueueRecord).filter(QueueRecord.queue_id == queue.id).delete()
+            session.delete(queue)
+            session.commit()
+            session.close()
 
 # reply @username on queue message
 @dp.message_handler(lambda msg: is_reply_queue(msg))
