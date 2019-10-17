@@ -1,3 +1,5 @@
+import hashlib
+import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import re
 import sys
@@ -11,6 +13,8 @@ from aiogram.types import InlineQuery, Message, User as TelegramUser, \
 from database import Session, Chat, QueueRecord, Queue, User
 from datetime import datetime, timedelta
 from config import token
+
+# logging.basicConfig(level=logging.DEBUG)
 
 bot = Bot(token=token)
 dp = Dispatcher(bot)
@@ -38,8 +42,8 @@ def get_chat(session, chat_id):
 
 def get_keyboard(queue):
     keyboard = InlineKeyboardMarkup()
-    keyboard.add(InlineKeyboardButton("Join", callback_data=f"add-{queue.id}"))
-    keyboard.add(InlineKeyboardButton("Leave", callback_data=f"del-{queue.id}"))
+    keyboard.add(InlineKeyboardButton("Записаться", callback_data=f"add-{queue.id}"))
+    keyboard.add(InlineKeyboardButton("Выписаться", callback_data=f"del-{queue.id}"))
     return keyboard
 
 
@@ -59,14 +63,14 @@ def is_reply_queue(message: Message):
 async def info_handler(message: Message):
     session = Session()
     chat = get_chat(session, message.chat.id)
-    chat_pin = "[✅ On]" if chat.pin else "[❌ Off]"
-    text = "List of commands:" \
-           "\n/create [text] - create queue." \
-           f"\n/timer [mins] - set time between creation and publication [{chat.default_time} minutes]." \
-           f"\n/pin - pin message (with notification) {chat_pin}." \
-           f"\n(notification is enabled by default)" \
-           f"\n\nIn order to add another user to queue reply to queue message with user's @username. " \
-           f"User must use the bot previously at least once(must be saved in database)"
+    chat_pin = "[✅ Включено]" if chat.pin else "[❌ Отключено]"
+    text = "Список команд:" \
+           "\n/create [text] - создать очередь." \
+           f"\n/timer [mins] - установить время между созданием очереди и пином [{chat.default_time} минут]." \
+           f"\n/pin - пин (с уведомлением) {chat_pin}." \
+           f"\n(если уведомление не пришло, проблемы телеграма, а не бота)" \
+           f"\n\nЧто бы записать другого человека в очередь, нужно ответить на сообщение бота с его @юзернеймом. " \
+           f"Этот человек должен хотя бы раз использовать очередь со своего аккаунта(быть записаным в базу данных)"
 
     session.commit()
     await message.reply(text, reply=False)
@@ -79,9 +83,9 @@ async def pin_switch_handler(message: Message):
     chat.pin = not chat.pin
     session.commit()
     if chat.pin:
-        await message.reply("Pin enabled", reply=False)
+        await message.reply("Пин включен", reply=False)
     else:
-        await message.reply("Pin disabled", reply=False)
+        await message.reply("Пин выключен", reply=False)
     session.close()
 
 
@@ -93,7 +97,7 @@ async def timer_empty_handler(message: Message):
     time = chat.default_time
     session.commit()
     session.close()
-    await message.reply(f"Times: {time} minutes", reply=False)
+    await message.reply(f"Таймер: {time} минут", reply=False)
 
 # /timer [mins]
 @dp.message_handler(commands=["timer"])
@@ -104,14 +108,14 @@ async def timer_handler(message: Message):
 
     arg = message.text.split(' ')
     if len(arg) < 2 or arg[1].replace(' ', '') == '' or check_int(arg[1]) is False:
-        await message.reply("Incorrect input\n"
+        await message.reply("Некорректный ввод\n"
                             "/timer [mins], mins >= 0, mins <= sys.maxint", reply=False)
         return
     if sys.maxsize <= int(arg[1]):
-        await message.reply("Number should not be larger than int", reply=False)
+        await message.reply("Число не может быть больше int", reply=False)
         return
     if int(arg[1]) < 0:
-        await message.reply("Number should not be less than 0", reply=False)
+        await message.reply("Число не может быть меньше нуля", reply=False)
         return
 
     session = Session()
@@ -120,7 +124,7 @@ async def timer_handler(message: Message):
     session.commit()
     session.close()
 
-    await message.reply(f"Timer is set to {int(arg[1])} minutes", reply=False)
+    await message.reply(f"Таймер установлен на {int(arg[1])} минут", reply=False)
 
 
 # /create [title]
@@ -128,7 +132,7 @@ async def timer_handler(message: Message):
 async def create_handler(message: Message):
     title = message.text[8:]
     if title.replace(" ", "") == "":
-        await message.reply("Empty title. Use /create [text]\n",
+        await message.reply("Пустой заголовок. Испольузйте /create [text]\n",
                             reply=False)
         return
     session = Session()
@@ -143,7 +147,7 @@ async def create_handler(message: Message):
     session.commit()
     session.close()
 
-    await message.reply(f"{title}\n\nPublication time: {time.strftime('%H:%M, %d.%m.%Y')}",
+    await message.reply(f"{title}\n\nВремя публикации: {time.strftime('%H:%M, %d.%m.%Y')}",
                         reply=False)
 
 
@@ -162,7 +166,7 @@ async def delete_handler(message: Message):
 
     session.close()
 
-    await message.reply("Only creator can close the queue", reply=False)
+    await message.reply("Право закрыть очередь есть только у создателя", reply=False)
 
 # reply @username on queue message
 @dp.message_handler(lambda msg: is_reply_queue(msg))
@@ -174,23 +178,23 @@ async def queue_reply_handler(message: Message):
     user = session.query(User).filter(User.username == username_plain).first()
     if not user:
         session.close()
-        await message.reply(f"`{username}` is not found.", parse_mode="Markdown")
+        await message.reply(f"`{username}` не найден.", parse_mode="Markdown")
         return
     queue = session.query(Queue).filter(Queue.message_id == message.reply_to_message.message_id).one()
     record = session.query(QueueRecord).filter(QueueRecord.user_id == user.id, QueueRecord.queue_id == queue.id).first()
     if record:
         session.close()
-        await message.reply(f"`{username}` is already in the list.", parse_mode="Markdown")
+        await message.reply(f"`{username}` уже записан.", parse_mode="Markdown")
         return
     if len(session.query(QueueRecord).filter(QueueRecord.creator_id == message.from_user.id).all()) >= 1:
         session.close()
-        await message.reply("You cant add more than 1 user")
+        await message.reply("Нельзя добавить больше 1 человека")
         return
     position = len(session.query(QueueRecord).filter(QueueRecord.queue_id == queue.id).all()) + 1
     session.add(QueueRecord(queue_id=queue.id, creator_id=message.from_user.id, user_id=user.id, position=position))
     session.commit()
 
-    text = f"{queue.title}\n\nLine:"
+    text = f"{queue.title}\n\nОчередь:"
     for record in session.query(QueueRecord).filter(QueueRecord.queue_id == queue.id).all():
         text += f"\n{record.position}. {record.user.user_name}"
 
@@ -199,7 +203,7 @@ async def queue_reply_handler(message: Message):
     session.commit()
     session.close()
 
-    await message.reply("User added")
+    await message.reply("Записано")
 
 # [ Записаться ]
 @dp.callback_query_handler(lambda callback: "add" in callback.data)
@@ -210,7 +214,7 @@ async def callback_add_handler(callback: CallbackQuery):
                                                QueueRecord.user_id == callback.from_user.id).first()
     if record:
         session.close()
-        await bot.answer_callback_query(callback.id, "You are already in the list")
+        await bot.answer_callback_query(callback.id, "Вы уже записаны")
         return
 
     queue = session.query(Queue).filter(Queue.id == queue_id).first()
@@ -219,11 +223,11 @@ async def callback_add_handler(callback: CallbackQuery):
     session.add(QueueRecord(queue_id=queue_id, user_id=callback.from_user.id, position=position))
     session.commit()
 
-    text = f"{queue.title}\n\nLine:"
+    text = f"{queue.title}\n\nОчередь:"
     for record in session.query(QueueRecord).filter(QueueRecord.queue_id == queue_id).all():
         text += f"\n{record.position}. {record.user.user_name}"
 
-    await bot.answer_callback_query(callback.id, "Entered")
+    await bot.answer_callback_query(callback.id, "Записано")
     await bot.edit_message_text(text, queue.chat_id, queue.message_id, reply_markup=get_keyboard(queue))
     session.close()
 
@@ -236,7 +240,7 @@ async def callback_del_handler(callback: CallbackQuery):
                                                QueueRecord.user_id == callback.from_user.id).first()
     if not record:
         session.close()
-        await bot.answer_callback_query(callback.id, "You are not in the list")
+        await bot.answer_callback_query(callback.id, "Вы не записаны")
         return
 
     user = get_user(session, callback.from_user)
@@ -244,11 +248,11 @@ async def callback_del_handler(callback: CallbackQuery):
     record.remove_record()
     session.commit()
 
-    text = f"{queue.title}\n\nLine:"
+    text = f"{queue.title}\n\nОчередь:"
     for record in session.query(QueueRecord).filter(QueueRecord.queue_id == queue_id).all():
         text += f"\n{record.position}. {record.user.user_name}"
 
-    await bot.answer_callback_query(callback.id, "Left the line")
+    await bot.answer_callback_query(callback.id, "Выписано")
     await bot.edit_message_text(text, queue.chat_id, queue.message_id, reply_markup=get_keyboard(queue))
     session.close()
 
@@ -262,12 +266,12 @@ async def check_queue():
         try:
             chat = get_chat(session, queue.chat_id)
             message = await bot.send_message(queue.chat_id,
-                                             f"{queue.title}\n\nLine:", reply_markup=get_keyboard(queue))
+                                             f"{queue.title}\n\nОчередь:", reply_markup=get_keyboard(queue))
             try:
                 if chat.pin:
                     await bot.pin_chat_message(queue.chat_id, message.message_id)
             except Exception as e:
-                await bot.send_message(queue.chat_id, "Not enough rights for the pin")
+                await bot.send_message(queue.chat_id, "Недостаточно прав для пина")
 
             queue.is_pinned = True
             queue.message_id = message.message_id
