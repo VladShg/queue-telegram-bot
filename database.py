@@ -3,6 +3,8 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm.session import object_session
 from sqlalchemy.orm import sessionmaker, relationship
 
+from config import db_path
+
 Base = declarative_base()
 
 
@@ -58,9 +60,6 @@ class QueueRecord(Base):
 
         session.delete(self)
         session.commit()
-
-
-db_path = "data.db"  # sqlite path
 
 engine = create_engine(f'sqlite:///{db_path}', echo=False)
 Base.metadata.create_all(bind=engine)
