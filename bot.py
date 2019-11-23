@@ -140,6 +140,8 @@ async def create_handler(message: Message):
     chat = get_chat(session, message.chat.id)
     delta = timedelta(minutes=chat.default_time)
     time += delta
+    seconds = timedelta(time.second)
+    time -= seconds
 
     message_bot = await message.reply(f"{title}\n\nВремя публикации: {time.strftime('%H:%M, %d.%m.%Y')}",
                                       reply=False)
@@ -153,10 +155,12 @@ async def create_handler(message: Message):
 # /delete
 @dp.message_handler(lambda msg: msg.reply_to_message is not None, commands=["delete"])
 async def delete_handler(message: Message):
-    pass
     session = Session()
     queue = session.query(Queue).filter(Queue.chat_id == message.chat.id,
                                         Queue.message_id == message.reply_to_message.message_id).first()
+    if queue is None:
+        session.close()
+        return
     if queue.creator_id != message.from_user.id:
         await message.reply("Право закрыть очередь есть только у создателя")
         session.close()
@@ -292,7 +296,7 @@ async def check_queue():
 
 if __name__ == '__main__':
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(check_queue, "interval", seconds=15, max_instances=1, coalesce=True)
+    scheduler.add_job(check_queue, "interval", seconds=5, max_instances=1, coalesce=True)
     scheduler.start()
 
-    executor.start_polling(dp)
+    executor.start_polling(dp, skip_updates=True)
