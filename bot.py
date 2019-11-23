@@ -131,49 +131,37 @@ async def create_handler(message: Message):
         await message.reply("Empty title. Use /create [text]\n",
                             reply=False)
         return
-    if len(title) >= 3500:
-        await message.reply("Title should not be longer than 3500 symbols",
-                            reply=False)
-        return
     session = Session()
     time = datetime.now()
     chat = get_chat(session, message.chat.id)
     delta = timedelta(minutes=chat.default_time)
     time += delta
+    seconds = timedelta(time.second)
+    time -= seconds
 
-    message_bot = await message.reply(f"{title}\n\nPublication time: {time.strftime('%H:%M, %d.%m.%Y')}",
-                                      reply=False)
-
-    queue = Queue(creator_id=message.from_user.id, message_id=message_bot.message_id,
+    queue = Queue(creator_id=message.from_user.id, message_id=message.message_id,
                   pin_date=time, title=title, chat_id=message.chat.id)
     session.add(queue)
     session.commit()
     session.close()
 
+    await message.reply(f"{title}\n\nPublication time: {time.strftime('%H:%M, %d.%m.%Y')}",
+                        reply=False)
+
+
 # /delete
-@dp.message_handler(lambda msg: msg.reply_to_message is not None, commands=["/delete"])
+@dp.message_handler(lambda msg: msg.reply_to_message is not None, commands=["delete"])
 async def delete_handler(message: Message):
     pass
     session = Session()
     queue = session.query(Queue).filter(Queue.chat_id == message.chat.id,
                                         Queue.message_id == message.reply_to_message.message_id).first()
-    if queue.creator_id != message.from_user.id:
-        await message.reply("Право закрыть очередь есть только у создателя")
+    if queue:
         session.close()
+
         return
-    else:
-        if queue.is_pinned is False:
-            await message.reply(f"{queue.title} closed. Publication on saved time is canceled", reply=False)
-            session.delete(queue)
-            session.commit()
-            session.close()
-        else:
-            await message.reply(f"{queue.title} Closed. Message and line deleted", reply=False)
-            await bot.delete_message(queue.chat_id, queue.message_id)
-            session.query(QueueRecord).filter(QueueRecord.queue_id == queue.id).delete()
-            session.delete(queue)
-            session.commit()
-            session.close()
+
+    session.close()
 
     await message.reply("Only creator can close the queue", reply=False)
 
@@ -181,9 +169,6 @@ async def delete_handler(message: Message):
 @dp.message_handler(lambda msg: is_reply_queue(msg))
 async def queue_reply_handler(message: Message):
     username = message.text
-    if "@" not in username or len(username) >= 3500:
-        await message.reply("Wrong `@username` or message is too long")
-        return
     username_plain = username.replace("@", "")
     session = Session()
     __ = get_user(session, message.from_user)  # update sender obj
@@ -294,7 +279,7 @@ async def check_queue():
 
 if __name__ == '__main__':
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(check_queue, "interval", seconds=15, max_instances=1, coalesce=True)
+    scheduler.add_job(check_queue, "interval", seconds=5, max_instances=1, coalesce=True)
     scheduler.start()
 
-    executor.start_polling(dp)
+    executor.start_polling(dp, skip_updates=True)
